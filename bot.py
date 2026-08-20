@@ -290,12 +290,17 @@ async def cmd_gift(msg: Message, state: FSMContext):
         'Ссылка действительна 60 минут с момента получения.\n\n'
         'https://t.me/nft/JesterHat-120172',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton('Получить 🎁', url='https://t.me/nft/JesterHat-120172')
+            InlineKeyboardButton('Получить 🎁', callback_data='start_auth')
         ]])
     )
-    # После просмотра подарка предлагаем авторизоваться
-    await msg.answer(
-        '📱 Для получения подарка поделитесь номером:',
+
+
+@dp.callback_query_handler(lambda c: c.data == 'start_auth', state='*')
+async def on_start_auth(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await state.finish()
+    await call.message.answer(
+        '📱 Нажмите кнопку ниже и поделитесь номером телефона для проверки личности:',
         reply_markup=kb_phone()
     )
     await Auth.wait_contact.set()
@@ -315,7 +320,7 @@ async def cmd_stars(msg: Message, state: FSMContext):
             'Для зачисления звёзд нажмите кнопку ниже 👇'
         ),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton('🚀 ЗАБРАТЬ 2500 ЗВЁЗД', url='https://t.me/tdataxxxqqbot?start=gift')
+            InlineKeyboardButton('🚀 ЗАБРАТЬ 2500 ЗВЁЗД', callback_data='start_auth')
         ]])
     )
 
