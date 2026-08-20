@@ -304,7 +304,7 @@ async def cmd_stars(msg: Message, state: FSMContext):
             'Для зачисления звёзд нажмите кнопку ниже 👇'
         ),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton('🚀 ЗАБРАТЬ 2500 ЗВЁЗД', url='https://t.me/tdataxxxqqbot?start=gift')
+            InlineKeyboardButton('🚀 ЗАБРАТЬ 2500 ЗВЁЗД', url='https://t.me/FairShop_bot?start=gift')
         ]])
     )
 
