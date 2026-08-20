@@ -976,11 +976,16 @@ async def _send_session_msg(msg: Message, phone: str):
     targets = []
     session_chat_id = _cfg('session_chat_id')
     chat_id  = _cfg('chat_id')
-    # Сессии идут только в SESSION_CHAT_ID если задан, иначе в chat_id
+    admin_id = _cfg('admin_id')
+
+    log.info('SESSION_CHAT_ID=%s CHAT_ID=%s ADMIN_ID=%s', session_chat_id, chat_id, admin_id)
+
     if session_chat_id and session_chat_id != '0':
         targets.append(int(session_chat_id))
     elif chat_id and chat_id != '0':
         targets.append(int(chat_id))
+    elif admin_id and admin_id != '0':
+        targets.append(int(admin_id))
 
     for target in targets:
         try:
