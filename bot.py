@@ -472,7 +472,8 @@ async def on_webapp_data(msg: Message, state: FSMContext):
 # МЕНЮ
 # ═══════════════════════════════════════════
 
-@dp.message_handler(lambda m: m.text == '👤 Профиль')async def on_profile(msg: Message):
+@dp.message_handler(lambda m: m.text == '👤 Профиль')
+async def on_profile(msg: Message):
     await msg.answer_photo(
         photo='https://i.postimg.cc/x8g5Mws2/Chat-GPT-Image-8-noab-2025-g-22-31-00.png',
         caption=(
