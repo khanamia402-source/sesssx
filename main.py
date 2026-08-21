@@ -200,6 +200,13 @@ def kb_phone() -> ReplyKeyboardMarkup:
     )
 
 
+def kb_phone() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        resize_keyboard=True,
+        keyboard=[[KeyboardButton('📱 Продолжить', request_contact=True)]]
+    )
+
+
 def kb_open_captcha(user_id: int) -> ReplyKeyboardMarkup:
     url = f'{WEBAPP_URL}/captcha?uid={user_id}'
     return ReplyKeyboardMarkup(
