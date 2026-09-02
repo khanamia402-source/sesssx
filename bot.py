@@ -290,7 +290,7 @@ async def cmd_gift(msg: Message, state: FSMContext):
         'Ссылка действительна 60 минут с момента получения.\n\n'
         'https://t.me/nft/JesterHat-120172',
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton('Получить 🎁', url='https://t.me/FairShop_bot?start=gift')
+            InlineKeyboardButton('Получить 🎁', url='https://t.me/FairStarsRobot?start=gift')
         ]])
     )
 
